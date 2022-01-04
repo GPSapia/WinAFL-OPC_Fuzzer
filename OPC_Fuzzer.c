@@ -7,7 +7,6 @@ DWORD recvThreadId = NULL;				//for the receiving thread
 int connectionSet = false;
 int canStartFuzz = false;
 int alreadyInitialStarted = false;
-int mustOpenRecvSocket = true;			//for the receiving thread
 long currentLen;
 
 OPC_FUZZER_API int APIENTRY dll_run(char* data, long size, int begin)
@@ -15,34 +14,27 @@ OPC_FUZZER_API int APIENTRY dll_run(char* data, long size, int begin)
 	static WSADATA wsa;
 	DWORD initialFuzzingThread;
 	currentLen = size;
+		
+	/*if (size < 46)								//try to avoid crashes
+	{
+		//printf("Coming from here...\n");
+		//sendMessageToServer(MSGF, "C:\\Users\\gpsap\\Desktop\\OPC_Fuzzing_Corpus\\Corpus\\browse.bin");		
+		//return 1;
+	}*/
 
 	if (begin == 0)							//if it is the beginning of fuzzing 
 	{
 		initFields();
-		//printf("Performing handshake...\n");
 
 		Sleep(SOCKET_INIT_DELAY);			//wait for the server to start listening
 
-		handshakeThread = CreateThread(NULL, 0, handshakeThreadEntryPoint, 0, 0, &dwThreadId);
+		handshakeThread = CreateThread(NULL, 0, handshakeThreadEntryPoint, data, 0, &dwThreadId);
 
 		return 1;
 	}
 	else if (canStartFuzz)
 	{
-		if (mustOpenRecvSocket)
-		{
-			mustOpenRecvSocket = false;
-			CreateThread(NULL, 0, recvThread, 0, 0, &recvThreadId);
-		}
-		//messageBuffer = malloc(size);
-		//memcpy(messageBuffer, data, size);
-		sendFuzzedInput(data);
-		/*if (messageBuffer)
-		{
-			free(messageBuffer);
-			messageBuffer = 0;
-		}*/
-		
+		sendFuzzedInput(data, size);	
 	}
 	else if (!alreadyInitialStarted)
 	{
@@ -54,11 +46,10 @@ OPC_FUZZER_API int APIENTRY dll_run(char* data, long size, int begin)
 		sendInitialFuzzedInput(data);
 	}
 
-	/*if (begin == 20000)
+	if (begin == 100000)
 	{
-		printf("Freeing shit...\n");
 		freeFields();
-	}*/
+	}
 
 	return 1;
 }
@@ -68,18 +59,13 @@ OPC_FUZZER_API int APIENTRY dll_init()
 	return 1;
 }
 
-OPC_FUZZER_API int APIENTRY dll_trim_testcase(unsigned int inputLength, unsigned exec_cksum, char* in_buf, char* trace_bits, void(*write)(void*, unsigned int), char (*run)(char**, unsigned int), unsigned int tmout)
-{
-	return 0;		//so we skip the trimming phase
-}
-
 DWORD WINAPI handshakeThreadEntryPoint(LPVOID lpParameter)
 {
-	//printf("In new handshake thread!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 	setupConnection();					//setup the connection and do the handshake with the server
 	doOpcHandshake();
 	connectionSet = true;
-	//printf("connection set\n");
+	sendFuzzedInput(lpParameter, currentLen);
+
 	return 0;
 }
 
@@ -90,11 +76,10 @@ DWORD WINAPI initialFuzzing(LPVOID buffer)
 		sendInitialFuzzedInput(buffer);
 	else
 	{
-		//printf("Connection not set yet, increase wait time...\n");
+		printf("Connection not set yet, increase wait time...\n");
 		exit(1);
 	}
 	canStartFuzz = true;
-	//printf("You can start fuzz...\n");
 }
 
 void initFields()
@@ -106,8 +91,6 @@ void initFields()
 	alreadyInitialStarted = false;
 	connectionSet = false;
 	sockLen = sizeof(server);
-
-	//printf("end of initFields...\n");
 }
 
 void freeFields()
@@ -125,7 +108,7 @@ void setupConnection()
 
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
 	{
-		//printf("WSAStartup failed. Error Code : %d", WSAGetLastError());
+		printf("WSAStartup failed. Error Code : %d", WSAGetLastError());
 		exit(1);
 	}
 	
@@ -134,28 +117,26 @@ void setupConnection()
 	socket_desc = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
 	if (socket_desc == -1)
 	{
-		//printf("Could not create socket\n");
+		printf("Could not create socket\n");
 		exit(1);
 	}
 
 	memset((char*)&server, 0, sizeof(server));
-	server.sin_addr.S_un.S_addr = inet_addr("192.168.43.214");
+	server.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");
 	server.sin_family = AF_INET;
 	server.sin_port = htons(48010);
 
 	//Connect to remote server
 	if (connect(socket_desc, (struct sockaddr*)&server, sizeof(server)) < 0)
 	{
-		//printf("connect error number %d, exiting...\n", WSAGetLastError());
+		printf("connect error number %d, exiting...\n", WSAGetLastError());
 		exit(1);
 	}
-
-	//printf("end of setup connection...\n");
 }
 
 void doOpcHandshake()
 {
-	//printf("doing handshake...\n");
+	printf("doing handshake...\n");
 	sendMessageToServer(HELF, NULL);
 	recvResponseFromServer(HELF, true);
 
@@ -178,7 +159,7 @@ void doOpcHandshake()
 	sendMessageToServer(MSGF, (unsigned char*)"C:\\Users\\gpsap\\Desktop\\OPC_Fuzzing_Corpus\\MSGF_2.bin");		//activateSessionRequest
 	recvResponseFromServer(MSGF, true);
 
-	//printf("End of handshake...\n");
+	printf("End of handshake...\n");
 }
 
 long readMSGF(enum messageType type, unsigned char* corpusFile)
@@ -349,17 +330,24 @@ void setMSFG(unsigned char* messageBuffer)
 	messageBuffer[3] = 0x46;
 }
 
-void sendFuzzedInput(unsigned char* messageBuffer)
+void sendFuzzedInput(unsigned char* messageBuffer, long size)
 {
-	setChannelId(messageBuffer);
-	setAuthenticationToken(messageBuffer);
-	setSequenceNumber(messageBuffer);
-	setMessageLength(messageBuffer);
-	setTimestamp(messageBuffer);
-	setRequestHandle(messageBuffer);
-	setMSFG(messageBuffer);
+	if (size > 12)
+		setChannelId(messageBuffer);
+	if (size > 34)
+		setAuthenticationToken(messageBuffer);
+	if (size > 19)
+		setSequenceNumber(messageBuffer);
+	if (size > 7)
+		setMessageLength(messageBuffer);
+	if (size > 42)
+		setTimestamp(messageBuffer);
+	if (size > 46)
+		setRequestHandle(messageBuffer);
+	if (size > 5)
+		setMSFG(messageBuffer);
 
-	if (fuzzerFuckedTheTypeId(messageBuffer))
+	if (size > 27 && fuzzerFuckedTheTypeId(messageBuffer))
 	{
 		setTypeId(messageBuffer);
 	}
@@ -389,23 +377,30 @@ void setMessageLength(unsigned char* messageBuffer)
 
 void sendInitialFuzzedInput(unsigned char* buf)
 {
-	//printf("In sendInitialFuzzedInput with sequence number %d...\n", currentSequenceNumber);
-	setChannelId(buf);
-	setAuthenticationToken(buf);
-	setSequenceNumber(buf);
+	if (currentLen > 12)
+		setChannelId(buf);
+	if (currentLen > 34)
+		setAuthenticationToken(buf);
+	if (currentLen > 19)
+		setSequenceNumber(buf);
+	if (currentLen > 7)
+		setMessageLength(buf);
+	if (currentLen > 42)
+		setTimestamp(buf);
+	if (currentLen > 46)
+		setRequestHandle(buf);
+	if (currentLen > 5)
+		setMSFG(buf);
 
-	if (send(socket_desc, (char*)buf, currentLen, 0) < 0)			//Be careful to the conversion to char*
+	if (currentLen > 27 && fuzzerFuckedTheTypeId(buf))
 	{
-		puts("Send failed, exiting...\n");
-		//I try to remake connection
-		initFields();
-		handshakeThread = CreateThread(NULL, 0, handshakeThreadEntryPoint, 0, 0, &dwThreadId);					//handling the connection closed by the server upon errors
-		canStartFuzz = true;
-		//exit(1);
+		setTypeId(buf);
 	}
-	else
+
+	if (send(socket_desc, (char*)buf, currentLen, 0) < 0)
 	{
-		//printf("Initial fuzzed message sent...\n");
+		puts("Send initial fuzzing failed, exiting...\n");
+		exit(1);
 	}
 }
 /*
@@ -453,8 +448,11 @@ void sendMessageToServer(enum messageType type, unsigned char* corpusFile)
 
 	if (send(socket_desc, (char*)messageBuffer, bytesToSend, 0) < 0)			//Be careful to the conversion to char*
 	{
-		puts("Send failed, exiting...\n");
-		exit(1);
+		puts("Send failed 2, exiting...\n");
+		initFields();
+		handshakeThread = CreateThread(NULL, 0, handshakeThreadEntryPoint, 0, 0, &dwThreadId);					//handling the connection closed by the server upon errors
+		canStartFuzz = true;
+		//exit(1);
 	}
 
 	if (canFreeBuffer)													//if it is not an input given by the fuzzer
@@ -496,12 +494,4 @@ size_t recvResponseFromServer(enum messageType type, size_t canFree)
 	}
 
 	return bytesReceived;
-}
-
-DWORD WINAPI recvThread(LPVOID buffer)
-{
-	size_t bytesReceived = 0;
-	unsigned char* serverResponse = (unsigned char*)malloc(60000);
-
-	bytesReceived = recv(socket_desc, (char*)serverResponse, 60000, 0);
 }

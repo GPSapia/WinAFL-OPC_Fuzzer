@@ -21,7 +21,6 @@
 
 OPC_FUZZER_API int APIENTRY dll_init();
 OPC_FUZZER_API int APIENTRY dll_run(char* data, long size, int fuzz_iterations);
-OPC_FUZZER_API int APIENTRY dll_trim_testcase(unsigned int inputLength, unsigned exec_cksum, char* in_buf, char* trace_bits, void(*write)(void*, unsigned int), char (*run)(char**, unsigned int), unsigned int tmou);
 
 unsigned char* messageBuffer;
 unsigned char* msgResponse;
@@ -56,7 +55,6 @@ extern void retrieveAuthenticationTokenId(unsigned char* serverCreateSessionResp
 extern void setChannelId(unsigned char* buf);
 extern DWORD WINAPI handshakeThreadEntryPoint(LPVOID lpParameter);
 extern DWORD WINAPI initialFuzzing(LPVOID buffer);
-extern DWORD WINAPI recvThread(LPVOID buffer);                                  //for the receiving thread
 extern void setAuthenticationToken(unsigned char* buf);
 extern void setSequenceNumber(unsigned char* buf);
 extern void setMessageLength(unsigned char* buf);
@@ -64,5 +62,5 @@ extern void setTypeId(unsigned char* buf);
 extern void printServerResponse(unsigned char* response, size_t length);
 int fuzzerFuckedTheTypeId(unsigned char* buf);
 
-extern void sendFuzzedInput(unsigned char* buf);
+extern void sendFuzzedInput(unsigned char* buf, long size);
 extern void sendInitialFuzzedInput(unsigned char* data);
